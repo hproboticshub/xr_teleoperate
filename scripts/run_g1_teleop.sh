@@ -7,7 +7,7 @@
 #   scripts/run_g1_teleop.sh [wrapper flags] [teleop flags...]
 #
 # Examples:
-#   scripts/run_g1_teleop.sh --motion --network-interface enp3s0
+#   scripts/run_g1_teleop.sh --motion --network-interface enxf44dad0705a2
 #   scripts/run_g1_teleop.sh --arm G1_29 --ee dex3 --input-mode controller --record
 #
 # Wrapper flags (consumed here, not forwarded):
@@ -17,7 +17,8 @@
 #
 # Environment overrides:
 #   G1_SSH_HOST      ssh host/alias of PC2          (default: g1-jetson)
-#   G1_REMOTE_ENV    conda env on PC2               (default: teleimager)
+#   G1_REMOTE_START  command on PC2 that (re)starts the image server
+#                                                   (default: ~/start_teleimager.sh)
 #   G1_LOCAL_ENV     micromamba/conda env locally   (default: tv)
 #   G1_IMG_PORT      zmq port used to check the server is up (default: 55555)
 #   G1_REMOTE_LOG    server log file on PC2         (default: /tmp/teleimager.log)
@@ -25,7 +26,7 @@
 set -euo pipefail
 
 SSH_HOST="${G1_SSH_HOST:-g1-jetson}"
-REMOTE_ENV="${G1_REMOTE_ENV:-teleimager}"
+REMOTE_START="${G1_REMOTE_START:-~/start_teleimager.sh}"
 LOCAL_ENV="${G1_LOCAL_ENV:-tv}"
 IMG_PORT="${G1_IMG_PORT:-55555}"
 REMOTE_LOG="${G1_REMOTE_LOG:-/tmp/teleimager.log}"
@@ -55,7 +56,7 @@ die() { printf '\033[1;31m[g1] %s\033[0m\n' "$*" >&2; exit 1; }
 remote() { ssh "${SSH_OPTS[@]}" "$SSH_HOST" "$@"; }
 
 # The [x] trick keeps pgrep from matching its own command line.
-SERVER_PATTERN='[t]eleimager-server|[t]eleimager.image_server'
+SERVER_PATTERN='[t]eleimager.image_server'
 server_running() { remote "pgrep -f '$SERVER_PATTERN' >/dev/null"; }
 stop_server()    { remote "pkill -f '$SERVER_PATTERN' || true"; }
 
@@ -90,10 +91,9 @@ if [[ $START_SERVER -eq 1 ]]; then
     if server_running; then
         log "Image server already running on $SSH_HOST"
     else
-        log "Starting image server on $SSH_HOST (env: $REMOTE_ENV, log: $REMOTE_LOG)"
-        # Interactive shell (-i) so ~/.bashrc initialises conda on PC2.
-        # All fds are redirected so ssh returns immediately.
-        remote "nohup bash -ic 'conda activate $REMOTE_ENV && teleimager-server' >'$REMOTE_LOG' 2>&1 </dev/null &"
+        log "Starting image server on $SSH_HOST ($REMOTE_START, log: $REMOTE_LOG)"
+        # The start script detaches the server itself (setsid), so ssh returns at once.
+        remote "$REMOTE_START"
     fi
 
     log "Waiting for image server (port $IMG_PORT)..."
