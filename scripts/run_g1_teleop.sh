@@ -17,8 +17,9 @@
 #                      Unitree's video_hub_pc4 service, and exit
 #
 # Environment overrides:
-#   G1_SSH_HOST      ssh target of PC2 (user@ip or alias)
-#                                                   (default: unitree@192.168.123.164)
+#   G1_SSH_HOST      ssh target of PC2 (user@ip or alias). Default: the 'g1-jetson'
+#                    alias if it is defined in ~/.ssh/config, else
+#                    unitree@192.168.123.164
 #   G1_SSH_KEY       private key to use for PC2 (default: ssh's own defaults/config)
 #   G1_REMOTE_DIR    teleimager folder on PC2       (default: ~/teleimager)
 #   G1_REMOTE_ENV    conda env dir on PC2 that has teleimager-server
@@ -32,7 +33,15 @@
 
 set -euo pipefail
 
-SSH_HOST="${G1_SSH_HOST:-unitree@192.168.123.164}"
+if [[ -z "${G1_SSH_HOST:-}" ]]; then
+    # Use the g1-jetson alias when this machine defines one (it may carry the key).
+    if [[ "$(ssh -G g1-jetson 2>/dev/null | awk '/^hostname /{print $2}')" != "g1-jetson" ]]; then
+        G1_SSH_HOST=g1-jetson
+    else
+        G1_SSH_HOST=unitree@192.168.123.164
+    fi
+fi
+SSH_HOST="$G1_SSH_HOST"
 REMOTE_DIR="${G1_REMOTE_DIR:-~/teleimager}"
 REMOTE_ENV="${G1_REMOTE_ENV:-~/miniforge3/envs/tv}"
 LOCAL_ENV="${G1_LOCAL_ENV:-tv}"
@@ -43,7 +52,10 @@ MSCLI=/unitree/sbin/mscli
 SERVER_WAIT_S=40
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=5 -o LogLevel=ERROR)
+# One multiplexed connection: if no key is installed, ssh asks for the password
+# once (default Unitree password: 123) and every later call reuses it.
+SSH_OPTS=(-o ConnectTimeout=5 -o LogLevel=ERROR
+          -o ControlMaster=auto -o "ControlPath=/tmp/g1-ssh-%C" -o ControlPersist=10m)
 [[ -n "${G1_SSH_KEY:-}" ]] && SSH_OPTS+=(-i "$G1_SSH_KEY" -o IdentitiesOnly=yes)
 
 # --- wrapper flags ---------------------------------------------------------
@@ -90,7 +102,7 @@ wait_for_port() {
 }
 
 # --- image server on PC2 ---------------------------------------------------
-remote true 2>/dev/null || die "Cannot ssh to '$SSH_HOST' without a password. Check the robot is reachable and your key is installed there (ssh-copy-id -i <key>.pub $SSH_HOST); set G1_SSH_KEY=<private key> if it is not a default key."
+remote true || die "Cannot ssh to '$SSH_HOST'. Check the robot is reachable (ping 192.168.123.164) and the password/key is right. To avoid the password: ssh-copy-id -i <key>.pub $SSH_HOST (and G1_SSH_KEY=<private key> if it is not a default key)."
 
 if [[ $STOP_ONLY -eq 1 ]]; then
     log "Stopping image server on $SSH_HOST"
