@@ -25,6 +25,8 @@
 #   G1_REMOTE_ENV    conda env dir on PC2 that has teleimager-server
 #                                                   (default: ~/miniforge3/envs/tv)
 #   G1_NET_IF        DDS network interface          (default: auto-detect 192.168.123.x)
+#   G1_PYTHON        python to run the teleop with  (default: the activated venv,
+#                    <repo>/tv or <repo>/.venv, else the G1_LOCAL_ENV env)
 #   G1_LOCAL_ENV     micromamba/conda env locally   (default: tv)
 #   G1_IMG_PORT      zmq port used to check the server is up (default: 55555)
 #   G1_REMOTE_LOG    server log file on PC2         (default: /tmp/teleimager.log)
@@ -102,7 +104,9 @@ wait_for_port() {
 }
 
 # --- image server on PC2 ---------------------------------------------------
-remote true || die "Cannot ssh to '$SSH_HOST'. Check the robot is reachable (ping 192.168.123.164) and the password/key is right. To avoid the password: ssh-copy-id -i <key>.pub $SSH_HOST (and G1_SSH_KEY=<private key> if it is not a default key)."
+if [[ $START_SERVER -eq 1 || $STOP_ONLY -eq 1 ]]; then
+    remote true || die "Cannot ssh to '$SSH_HOST'. Check the robot is reachable (ping 192.168.123.164) and the password/key is right. To avoid the password: ssh-copy-id -i <key>.pub $SSH_HOST (and G1_SSH_KEY=<private key> if it is not a default key)."
+fi
 
 if [[ $STOP_ONLY -eq 1 ]]; then
     log "Stopping image server on $SSH_HOST"
@@ -144,16 +148,30 @@ if [[ $START_SERVER -eq 1 ]]; then
 fi
 
 # --- teleop on the host ----------------------------------------------------
-if [[ "${CONDA_DEFAULT_ENV:-${MAMBA_DEFAULT_ENV:-}}" != "$LOCAL_ENV" ]]; then
-    if command -v micromamba >/dev/null 2>&1; then
-        eval "$(micromamba shell hook -s bash)"
-        micromamba activate "$LOCAL_ENV"
-    elif command -v conda >/dev/null 2>&1; then
-        eval "$(conda shell.bash hook)"
-        conda activate "$LOCAL_ENV"
-    else
-        die "Neither micromamba nor conda found; activate the '$LOCAL_ENV' env yourself."
+# Python environment, in order: G1_PYTHON, an activated venv, <repo>/tv or
+# <repo>/.venv (see requirements.txt), then the G1_LOCAL_ENV conda/micromamba env.
+PYTHON="${G1_PYTHON:-}"
+if [[ -z "$PYTHON" && -n "${VIRTUAL_ENV:-}" ]]; then
+    PYTHON="$VIRTUAL_ENV/bin/python"
+fi
+for venv in "$REPO_DIR/tv" "$REPO_DIR/.venv"; do
+    if [[ -z "$PYTHON" && -x "$venv/bin/python" ]]; then
+        PYTHON="$venv/bin/python"
     fi
+done
+if [[ -z "$PYTHON" ]]; then
+    if [[ "${CONDA_DEFAULT_ENV:-${MAMBA_DEFAULT_ENV:-}}" != "$LOCAL_ENV" ]]; then
+        if command -v micromamba >/dev/null 2>&1; then
+            eval "$(micromamba shell hook -s bash)"
+            micromamba activate "$LOCAL_ENV"
+        elif command -v conda >/dev/null 2>&1; then
+            eval "$(conda shell.bash hook)"
+            conda activate "$LOCAL_ENV"
+        else
+            die "No Python environment found. Create a venv (see requirements.txt) and activate it, set G1_PYTHON, or create a '$LOCAL_ENV' conda env."
+        fi
+    fi
+    PYTHON=python
 fi
 
 # DDS needs the wired interface that is on the robot's 192.168.123.x network.
@@ -167,5 +185,5 @@ if ! has_arg --network-interface && ! has_arg --sim; then
 fi
 
 cd "$REPO_DIR/teleop"
-log "python teleop_hand_and_arm.py ${TELEOP_ARGS[*]:-}"
-exec python teleop_hand_and_arm.py "${TELEOP_ARGS[@]}"
+log "$PYTHON teleop_hand_and_arm.py ${TELEOP_ARGS[*]:-}"
+exec "$PYTHON" teleop_hand_and_arm.py "${TELEOP_ARGS[@]}"

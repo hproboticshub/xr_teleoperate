@@ -22,4 +22,5 @@ __MACOSX/
 teleop/data/
 episode_0*
 .vscode/
-*.pkl
+*.pkl.venv/
+/tv/

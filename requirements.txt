@@ -1,4 +1,20 @@
+# Run from the repo root, inside a Python 3.10 venv:
+#   git submodule update --init --depth 1
+#   python3.10 -m venv tv && source tv/bin/activate
+#   pip install -r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.3.0
+numpy==1.26.4
+pin==2.7.0
 matplotlib==3.7.5
 rerun-sdk==0.20.1
 meshcat==0.3.2
 sshkeyboard==2.3.1
+params_proto==2.13.2  # newer versions break vuer's import
+
+# Git submodules (editable) and the Unitree SDK
+-e ./teleop/teleimager
+-e ./teleop/televuer
+-e ./teleop/robot_control/dex-retargeting
+unitree_sdk2py @ git+https://github.com/unitreerobotics/unitree_sdk2_python.git
