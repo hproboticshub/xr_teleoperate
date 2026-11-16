@@ -142,10 +142,14 @@ if __name__ == '__main__':
         if args.motion:
             if args.input_mode == "controller":
                 loco_wrapper = LocoClientWrapper()
-        else:
-            motion_switcher = MotionSwitcher()
-            status, result = motion_switcher.Enter_Debug_Mode()
-            logger_mp.info(f"Enter debug mode: {'Success' if status == 0 else 'Failed'}")
+        elif not args.sim:
+            # Never release the locomotion controller automatically (a standing robot drops);
+            # the operator enters debug mode on the remote, or runs with --motion.
+            status, result = MotionSwitcher().msc.CheckMode()
+            if status != 0 or result.get('name'):
+                raise RuntimeError(f"Robot is not in debug mode (status={status}, mode={result}). "
+                                   "Put the robot in damp and enter debug mode on the remote (L2+R2), "
+                                   "or run with --motion to keep the locomotion controller.")
 
         xr_motion_data_ready = Value('b', False, lock=True)        # [input] whether XR hand/controller motion data has arrived
 

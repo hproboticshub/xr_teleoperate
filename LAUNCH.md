@@ -71,6 +71,12 @@ scripts/run_g1_teleop.sh --stop-server                                   # parar
 
 ## Problemas comuns
 
+### `Robot is not in debug mode`
+
+O script não coloca mais o robô em debug (development) mode sozinho. Coloque o
+robô em damp e entre no debug mode pelo controle (L2+R2). Outra opção é rodar
+com `--motion`, que mantém o controlador de locomoção ligado.
+
 ### BrainCo fica em `Waiting to subscribe dds...`
 
 O serviço das mãos BrainCo no PC2 parou de publicar. Reinicie-o:
