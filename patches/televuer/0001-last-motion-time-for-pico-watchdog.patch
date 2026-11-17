@@ -1,0 +1,42 @@
+diff --git a/src/televuer/televuer.py b/src/televuer/televuer.py
+index 1250131..26a675f 100644
+--- a/src/televuer/televuer.py
++++ b/src/televuer/televuer.py
+@@ -4,6 +4,7 @@ from multiprocessing import Value, Array, Process, shared_memory
+ import numpy as np
+ import asyncio
+ import threading
++import time
+ import cv2
+ import os
+ from pathlib import Path
+@@ -139,6 +140,7 @@ class TeleVuer:
+         self.left_arm_pose_shared = Array('d', 16, lock=True)
+         self.right_arm_pose_shared = Array('d', 16, lock=True)
+         self.motion_data_ready_shared = Value('b', False, lock=True)
++        self.last_motion_time_shared = Value('d', 0.0, lock=True)  # local change: time of the last XR event (watchdog)
+         if self.use_hand_tracking:
+             self.left_hand_position_shared = Array('d', 75, lock=True)
+             self.right_hand_position_shared = Array('d', 75, lock=True)
+@@ -264,6 +266,8 @@ class TeleVuer:
+             extract_controllers(right_controller, "right")
+             with self.motion_data_ready_shared.get_lock():
+                 self.motion_data_ready_shared.value = True
++            with self.last_motion_time_shared.get_lock():
++                self.last_motion_time_shared.value = time.time()
+         except:
+             pass
+ 
+@@ -869,6 +873,12 @@ class TeleVuer:
+         with self.right_ctrl_bButton_shared.get_lock():
+             return self.right_ctrl_bButton_shared.value
+ 
++    @property
++    def last_motion_time(self):
++        """float, time.time() of the last controller event (0.0 before the first one)."""
++        with self.last_motion_time_shared.get_lock():
++            return self.last_motion_time_shared.value
++
+     @property
+     def motion_data_ready(self):
+         """bool, whether at least one hand or controller motion data event has been received."""

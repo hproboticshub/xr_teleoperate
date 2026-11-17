@@ -20,6 +20,7 @@ from teleimager.image_client import ImageClient
 from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
 from teleop.utils.motion_switcher import MotionSwitcher, LocoClientWrapper
+from teleop.utils.pico_motion_ctrl import PicoMotionCtrl  # local addition: PICO-only control in --motion
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
@@ -139,9 +140,11 @@ if __name__ == '__main__':
                                      )
         
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
+        pico = None
         if args.motion:
             if args.input_mode == "controller":
                 loco_wrapper = LocoClientWrapper()
+                pico = PicoMotionCtrl(tv_wrapper.tvuer)
         else:
             motion_switcher = MotionSwitcher()
             status, result = motion_switcher.Enter_Debug_Mode()
@@ -269,19 +272,37 @@ if __name__ == '__main__':
             logger_mp.info("🔵  Recording is DISABLED (run with --record to enable).")
         logger_mp.info("🔴  Press [q] to stop and exit the program.")
         logger_mp.info("⚠️  IMPORTANT: Please keep your distance and stay safe.")
+        if pico:
+            logger_mp.info("🎮  PICO: B+Y 1 s = stand up (Regular mode) | A+X 1 s = start/resume | "
+                           "both stick clicks = stop | A+B+X+Y 1 s = quit")
         READY = True                  # now ready to (1) enter START state
         while not START and not STOP: # wait for start or stop signal.
             time.sleep(0.033)
+            if pico and pico.poll():
+                START = True
             if camera_config['head_camera']['enable_zmq'] and xr_need_local_img:
                 head_img = img_client.get_head_frame()
                 if head_img.bgr is not None:
                     tv_wrapper.render_to_xr(head_img.bgr)
+
+        # Local change: with `r` pressed before the PICO joined, the watchdog froze the arms and it looked hung.
+        if pico and not STOP and tv_wrapper.tvuer.last_motion_time == 0.0:
+            logger_mp.warning("[PICO] not connected yet: open https://localhost:8012/?ws=wss://localhost:8012 "
+                              "on the PICO and press Virtual Reality. Waiting...")
+            while not STOP and tv_wrapper.tvuer.last_motion_time == 0.0:
+                time.sleep(0.1)
+            if not STOP:
+                logger_mp.info("[PICO] connected")
 
         logger_mp.info("---------------------🚀start Tracking🚀-------------------------")
 
         head_img = None
         left_wrist_img = None
         right_wrist_img = None
+
+        # Local change (2026-11-03, Tiago): quit needs A+B+X+Y held for 1 s, not a single A press.
+        QUIT_HOLD_S = 1.0
+        quit_combo_since = None
 
         # main loop. robot start to follow VR user's motion
         while not STOP:
@@ -315,6 +336,10 @@ if __name__ == '__main__':
 
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
+            live_data = tele_data  # buttons are always read live; the robot follows the filtered data
+            if pico:
+                pico.poll()
+                tele_data = pico.filter(live_data)
             if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
                 with left_hand_pos_array.get_lock():
                     left_hand_pos_array[:] = tele_data.left_hand_pos.flatten()
@@ -346,13 +371,22 @@ if __name__ == '__main__':
             
             # high level control
             if args.input_mode == "controller" and args.motion:
-                # quit teleoperate
-                if tele_data.right_ctrl_aButton:
-                    START = False
-                    STOP = True
+                # quit teleoperate: A+B (right) and X+Y (left; televuer names them a/b) held for QUIT_HOLD_S
+                if (live_data.right_ctrl_aButton and live_data.right_ctrl_bButton
+                        and live_data.left_ctrl_aButton and live_data.left_ctrl_bButton):
+                    if quit_combo_since is None:
+                        quit_combo_since = time.time()
+                        logger_mp.info(f"A+B+X+Y held: quitting in {QUIT_HOLD_S:.0f} s unless released")
+                    elif time.time() - quit_combo_since >= QUIT_HOLD_S:
+                        START = False
+                        STOP = True
+                else:
+                    quit_combo_since = None
                 # command robot to enter damping mode. soft emergency stop function
-                if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
-                    loco_wrapper.Damp()
+                # Disabled locally (2026-11-03, Tiago): Damp on a standing G1 drops it. Both stick clicks now stop
+                # (zero velocity, arms frozen) in utils/pico_motion_ctrl.py.
+                # if tele_data.left_ctrl_thumbstick and tele_data.right_ctrl_thumbstick:
+                #     loco_wrapper.Damp()
                 # https://github.com/unitreerobotics/xr_teleoperate/issues/135, control, limit velocity to within 0.3
                 loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
                                   -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
