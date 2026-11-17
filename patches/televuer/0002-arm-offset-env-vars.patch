@@ -1,0 +1,61 @@
+diff --git a/src/televuer/tv_wrapper.py b/src/televuer/tv_wrapper.py
+index f820f6a..d73f67e 100644
+--- a/src/televuer/tv_wrapper.py
++++ b/src/televuer/tv_wrapper.py
+@@ -1,3 +1,4 @@
++import os
+ import numpy as np
+ from .televuer import TeleVuer
+ from dataclasses import dataclass, field
+@@ -100,7 +101,7 @@ def get_Brobot_world_head_yaw_rot(Brobot_world_head_rot):
+     Brobot_world_head_y_axis /= np.linalg.norm(Brobot_world_head_y_axis)
+     return np.column_stack([Brobot_world_head_x_axis, Brobot_world_head_y_axis, Brobot_world_head_z_axis])
+ 
+-def transform_IPunitree_Brobot_world_arm_to_head_then_waist(IPunitree_Brobot_world_arm, Brobot_world_head, arm_reference_mode):
++def transform_IPunitree_Brobot_world_arm_to_head_then_waist(IPunitree_Brobot_world_arm, Brobot_world_head, arm_reference_mode, side=0):
+     IPunitree_Brobot_head_arm = IPunitree_Brobot_world_arm.copy()
+     # Transfer from WORLD to HEAD coordinate:
+     # - "head_position": translation adjustment only.
+@@ -114,10 +115,18 @@ def transform_IPunitree_Brobot_world_arm_to_head_then_waist(IPunitree_Brobot_wor
+ 
+     # Translate the origin of IPunitree_Brobot_head_arm from HEAD to WAIST.
+     IPunitree_Brobot_waist_arm = IPunitree_Brobot_head_arm.copy()
+-    IPunitree_Brobot_waist_arm[0, 3] += 0.15
+-    IPunitree_Brobot_waist_arm[2, 3] += 0.45
++    IPunitree_Brobot_waist_arm[0, 3] += ARM_OFFSET_X
++    IPunitree_Brobot_waist_arm[2, 3] += ARM_OFFSET_Z
++    IPunitree_Brobot_waist_arm[1, 3] += side * ARM_OFFSET_Y  # side +1 left, -1 right: >0 moves both hands outward
+     return IPunitree_Brobot_waist_arm
+ 
++# Local change (2026-11-17, Tiago): head -> waist offset tunable per operator without editing code.
++# Upstream values 0.15 / 0.45. Smaller X = robot hands further back (elbows less forward); smaller Z = hands lower.
++ARM_OFFSET_X = float(os.environ.get("XR_ARM_OFFSET_X", 0.15))
++ARM_OFFSET_Z = float(os.environ.get("XR_ARM_OFFSET_Z", 0.45))
++ARM_OFFSET_Y = float(os.environ.get("XR_ARM_OFFSET_Y", 0.0))  # local: lateral, outward for both arms (upstream has none)
++print(f"[tv_wrapper] arm offset head->waist: X={ARM_OFFSET_X} m (forward), Z={ARM_OFFSET_Z} m (up), Y={ARM_OFFSET_Y} m (outward)")
++
+ # constants variable
+ T_TO_UNITREE_HUMANOID_LEFT_ARM = np.array([[1, 0, 0, 0],
+                                            [0, 0,-1, 0],
+@@ -336,8 +345,8 @@ class TeleVuerWrapper:
+             # The origin of the coordinate for IK Solve is near the WAIST joint motor. You can use teleop/robot_control/robot_arm_ik.py Unit_Test to visualize it.
+             # Transfer IPunitree_Brobot_world_arm to IPunitree_Brobot_head_arm first, then translate the origin from HEAD to WAIST.
+             # "head_yaw" additionally left-multiplies R_Brobot_world_head_yaw^T, ignoring pitch/roll.
+-            left_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(left_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode)
+-            right_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(right_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode)
++            left_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(left_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode, side=1)
++            right_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(right_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode, side=-1)
+ 
+             # -----------------------------------hand position----------------------------------------
+             if left_arm_is_valid and right_arm_is_valid:
+@@ -428,8 +437,8 @@ class TeleVuerWrapper:
+             # The origin of the coordinate for IK Solve is near the WAIST joint motor. You can use teleop/robot_control/robot_arm_ik.py Unit_Test to check it.
+             # Transfer IPunitree_Brobot_world_arm to IPunitree_Brobot_head_arm first, then translate the origin from HEAD to WAIST.
+             # "head_yaw" additionally left-multiplies R_Brobot_world_head_yaw^T, ignoring pitch/roll.
+-            left_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(left_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode)
+-            right_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(right_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode)
++            left_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(left_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode, side=1)
++            right_IPunitree_Brobot_waist_arm = transform_IPunitree_Brobot_world_arm_to_head_then_waist(right_IPunitree_Brobot_world_arm, Brobot_world_head, self.arm_reference_mode, side=-1)
+             return TeleData(
+                 head_pose=Brobot_world_head,
+                 left_wrist_pose=left_IPunitree_Brobot_waist_arm,

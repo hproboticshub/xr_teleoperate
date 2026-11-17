@@ -6,11 +6,25 @@
 # Usage:
 #   scripts/run_g1_teleop.sh [wrapper flags] [teleop flags...]
 #
+# By default the robot is NOT put in dev (debug) mode: the script starts the
+# teleop with --motion --input-mode controller, so the PICO drives the FSM
+# (B+Y = stand up, A+X = start, ...) and nothing has to be done on the robot or
+# restarted to leave dev mode. See G1_EDU_MOTION_TELEOP.md for the controls.
+#
 # Examples:
-#   scripts/run_g1_teleop.sh --motion --network-interface enxf44dad0705a2
-#   scripts/run_g1_teleop.sh --arm G1_29 --ee dex3 --input-mode controller --record
+#   scripts/run_g1_teleop.sh --ee brainco
+#   scripts/run_g1_teleop.sh --ee brainco --arm-offset-x -0.15 --arm-offset-z 0.50
+#   scripts/run_g1_teleop.sh --dev-mode --arm G1_29 --ee dex3 --record
 #
 # Wrapper flags (consumed here, not forwarded):
+#   --dev-mode         put the robot in dev (debug) mode, like upstream teleop
+#                      without --motion: no PICO FSM/locomotion, legs are not
+#                      controlled. Default is off (--motion is added).
+#   --arm-offset-x M   head->waist arm offset, forward (default 0.15 m)
+#   --arm-offset-y M   head->waist arm offset, outward for both hands (default 0)
+#   --arm-offset-z M   head->waist arm offset, up (default 0.45 m)
+#                      (smaller X = robot hands further back; smaller Z = lower.
+#                      Same as env XR_ARM_OFFSET_X/Y/Z; the flag wins.)
 #   --no-server        do not touch the image server (assume it is running)
 #   --restart-server   kill the running image server and start it again
 #   --stop-server      stop the image server on PC2, give the head camera back to
@@ -64,14 +78,24 @@ SSH_OPTS=(-o ConnectTimeout=5 -o LogLevel=ERROR
 START_SERVER=1
 RESTART_SERVER=0
 STOP_ONLY=0
+DEV_MODE=0
 TELEOP_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
+# Offsets: flag (--arm-offset-x 0.1 or --arm-offset-x=0.1) -> XR_ARM_OFFSET_X env var.
+needs_value() { [[ $# -ge 2 ]] || { echo "[g1] $1 needs a value" >&2; exit 1; }; }
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --no-server)      START_SERVER=0 ;;
         --restart-server) RESTART_SERVER=1 ;;
         --stop-server)    STOP_ONLY=1 ;;
-        *)                TELEOP_ARGS+=("$arg") ;;
+        --dev-mode)       DEV_MODE=1 ;;
+        --arm-offset-[xyz])
+            needs_value "$@"
+            axis="${1: -1}"; export "XR_ARM_OFFSET_${axis^^}=$2"; shift ;;
+        --arm-offset-[xyz]=*)
+            axis="${1:13:1}"; export "XR_ARM_OFFSET_${axis^^}=${1#*=}" ;;
+        *)                TELEOP_ARGS+=("$1") ;;
     esac
+    shift
 done
 
 # --- helpers ---------------------------------------------------------------
@@ -183,6 +207,28 @@ if ! has_arg --network-interface && ! has_arg --sim; then
     log "Using network interface $NET_IF"
     TELEOP_ARGS+=(--network-interface "$NET_IF")
 fi
+
+# Dev mode is opt-in. Without it, run in --motion with the PICO controllers so
+# the robot is never forced into debug mode (the PICO B+Y combo handles the FSM).
+if [[ $DEV_MODE -eq 1 ]]; then
+    log "Dev mode ON: the teleop will put the robot in debug mode"
+else
+    has_arg --motion || TELEOP_ARGS+=(--motion)
+    has_arg --input-mode || TELEOP_ARGS+=(--input-mode controller)
+fi
+
+# The televuer submodule needs the local patches (PICO watchdog; arm offsets).
+# They are applied once; already-applied ones are skipped.
+TV_DIR="$REPO_DIR/teleop/televuer"
+for patch in "$REPO_DIR"/patches/televuer/*.patch; do
+    [[ -f "$patch" ]] || continue
+    if git -C "$TV_DIR" apply --check "$patch" 2>/dev/null; then
+        log "Applying $(basename "$patch") to teleop/televuer"
+        git -C "$TV_DIR" apply "$patch"
+    elif ! git -C "$TV_DIR" apply --check -R "$patch" 2>/dev/null; then
+        die "Cannot apply $(basename "$patch") to teleop/televuer (neither applied nor applicable)."
+    fi
+done
 
 cd "$REPO_DIR/teleop"
 log "$PYTHON teleop_hand_and_arm.py ${TELEOP_ARGS[*]:-}"
