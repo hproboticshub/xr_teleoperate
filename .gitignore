@@ -24,3 +24,4 @@ episode_0*
 .vscode/
 *.pkl.venv/
 /tv/
+/src/

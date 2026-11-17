@@ -84,6 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('--network-interface', type=str, default=None, help='Network interface for dds communication, e.g., eth0, wlan0. If None, use default interface.')
     # mode flags
     parser.add_argument('--motion', action = 'store_true', help = 'Enable motion control mode')
+    parser.add_argument('--dev-mode', action = 'store_true', help = 'Put the robot in dev (debug) mode on start (without --motion)')
     parser.add_argument('--headless', action='store_true', help='Enable headless mode (no display)')
     parser.add_argument('--sim', action = 'store_true', help = 'Enable isaac simulation mode')
     parser.add_argument('--ipc', action = 'store_true', help = 'Enable IPC server to handle input; otherwise enable sshkeyboard')
@@ -145,10 +146,20 @@ if __name__ == '__main__':
             if args.input_mode == "controller":
                 loco_wrapper = LocoClientWrapper()
                 pico = PicoMotionCtrl(tv_wrapper.tvuer)
-        else:
+        elif args.dev_mode:
+            # Explicit opt-in only: releasing the locomotion controller drops a standing robot.
+            logger_mp.warning("--dev-mode: releasing the locomotion controller (robot must be in damp/supported)")
             motion_switcher = MotionSwitcher()
             status, result = motion_switcher.Enter_Debug_Mode()
             logger_mp.info(f"Enter debug mode: {'Success' if status == 0 else 'Failed'}")
+        elif not args.sim:
+            # Never release the locomotion controller automatically (a standing robot drops);
+            # the operator enters debug mode on the remote, or runs with --motion.
+            status, result = MotionSwitcher().msc.CheckMode()
+            if status != 0 or result.get('name'):
+                raise RuntimeError(f"Robot is not in debug mode (status={status}, mode={result}). "
+                                   "Put the robot in damp and enter debug mode on the remote (L2+R2), "
+                                   "or run with --motion to keep the locomotion controller.")
 
         xr_motion_data_ready = Value('b', False, lock=True)        # [input] whether XR hand/controller motion data has arrived
 

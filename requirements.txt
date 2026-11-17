@@ -1,12 +1,14 @@
-# Run from the repo root, inside a Python 3.10 venv:
+# Setup (same as the README), from the repo root:
+#   conda create -n tv python=3.10 pinocchio=3.1.0 numpy=1.26.4 -c conda-forge
+#   conda activate tv
 #   git submodule update --init --depth 1
-#   python3.10 -m venv tv && source tv/bin/activate
 #   pip install -r requirements.txt
+# pinocchio must come from conda-forge: the pip "pin" wheels have no casadi
+# bindings (pinocchio.casadi), which the arm IK needs.
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 torch==2.3.0
 numpy==1.26.4
-pin==2.7.0
 matplotlib==3.7.5
 rerun-sdk==0.20.1
 meshcat==0.3.2
@@ -17,4 +19,5 @@ params_proto==2.13.2  # newer versions break vuer's import
 -e ./teleop/teleimager
 -e ./teleop/televuer
 -e ./teleop/robot_control/dex-retargeting
-unitree_sdk2py @ git+https://github.com/unitreerobotics/unitree_sdk2_python.git
+# editable: the regular wheel misses unitree_sdk2py/utils/lib/crc_*.so
+-e git+https://github.com/unitreerobotics/unitree_sdk2_python.git#egg=unitree_sdk2py
